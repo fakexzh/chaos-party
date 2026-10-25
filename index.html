@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chaos Party — Last Player Standing</title>
+<style>
+:root{--bg:#11152a;--panel:#1c2341;--ink:#f7f8ff;--muted:#aeb8dc;--pink:#ff5ca8;--cyan:#59e3e8;--yellow:#ffd166;--green:#6ef0a6}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#26315a,#11152a 60%);font-family:system-ui,Segoe UI,sans-serif;color:var(--ink);min-height:100vh}
+main{max-width:1100px;margin:auto;padding:24px}.hero{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1;margin:8px 0;color:var(--yellow);letter-spacing:-1px}p{color:var(--muted);line-height:1.5}.tag{display:inline-block;padding:6px 10px;border:1px solid #46517d;border-radius:99px;color:var(--cyan);font-size:.8rem;font-weight:700}
+.panel{background:rgba(28,35,65,.94);border:1px solid #39466f;border-radius:18px;padding:18px;box-shadow:0 12px 40px #0002;margin-top:18px}
+.grid{display:grid;grid-template-columns: minmax(0,1.5fr) minmax(260px,1fr);gap:18px}.controls{display:flex;gap:8px;flex-wrap:wrap}input,button{font:inherit;border-radius:11px;border:1px solid #4b5884;padding:12px;color:var(--ink);background:#121831}input{min-width:0;flex:1}button{cursor:pointer;background:var(--pink);color:#211126;border:0;font-weight:800}button.secondary{background:#303b63;color:var(--ink);border:1px solid #52608e}button:disabled{opacity:.45;cursor:not-allowed}
+#game{width:100%;display:block;background:#10162d;border-radius:14px;border:1px solid #46517d;aspect-ratio:16/10;touch-action:none}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.stat{background:#121831;border-radius:10px;padding:9px 12px;color:var(--muted);font-size:.9rem}.stat strong{color:var(--ink)}#players{display:grid;gap:8px}.player{display:flex;align-items:center;gap:10px;background:#121831;padding:9px 11px;border-radius:10px}.dot{width:13px;height:13px;border-radius:50%;flex:none}.player small{margin-left:auto;color:var(--muted)}.help{font-size:.9rem}.status{color:var(--green);font-weight:800;min-height:1.4em}.notice{color:var(--yellow);font-size:.88rem;white-space:pre-wrap}.hidden{display:none!important}.roomcode{font-size:1.2rem;letter-spacing:3px;font-weight:900;color:var(--cyan)}footer{color:#8f9bc4;font-size:.8rem;text-align:center;margin:24px 0}
+@media(max-width:760px){main{padding:14px}.grid{grid-template-columns:1fr}.panel{padding:14px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <div><span class="tag">ONLINE PARTY GAME · 2D</span><h1>CHAOS PARTY</h1><p>Last player standing wins. Dodge the bouncing chaos balls and don't get knocked out.</p></div>
+    <div class="tag">2–10 PLAYERS</div>
+  </div>
+  <section class="panel" id="setup">
+    <h2>Join the party</h2>
+    <p>Choose a nickname, then create a room or enter a friend's room code. Every player opens this same page.</p>
+    <div class="controls"><input id="nickname" maxlength="16" placeholder="Your nickname" value="Player"><button id="create">Create room</button></div>
+    <div class="controls" style="margin-top:10px"><input id="roomInput" maxlength="6" placeholder="Room code (e.g. A4K9Q2)" style="text-transform:uppercase"><button class="secondary" id="join">Join room</button></div>
+    <p class="notice" id="setupNotice">Online mode needs your Firebase settings. Follow README.txt in the downloaded ZIP, then paste the config into this file once.</p>
+  </section>
+  <section class="panel hidden" id="lobby">
+    <div class="hero"><div><span class="tag">ROOM CODE</span><div class="roomcode" id="roomCode">------</div><p>Share this code with your friends.</p></div><div><div class="status" id="status">Waiting for players…</div><p class="help">Host starts the round when everyone is ready.</p></div></div>
+    <div class="stats"><div class="stat">Players: <strong id="playerCount">0/10</strong></div><div class="stat">Controls: <strong>WASD / Arrow keys</strong></div><div class="stat">Round: <strong id="roundState">Lobby</strong></div></div>
+    <div class="controls"><button id="start">Start round</button><button class="secondary" id="leave">Leave room</button></div>
+  </section>
+  <div class="grid hidden" id="playArea">
+    <section class="panel"><canvas id="game" width="800" height="500" aria-label="Game arena"></canvas><div class="stats"><div class="stat">Time: <strong id="timer">0.0s</strong></div><div class="stat">Alive: <strong id="aliveCount">0</strong></div></div><p class="help">Move with <b>WASD</b> or <b>arrow keys</b>. Stay away from the moving pink chaos balls. On mobile, tap and drag in the arena.</p></section>
+    <section class="panel"><h2>Party roster</h2><div id="players"></div><p class="help">If someone disconnects, their dot may remain until the room is refreshed or the host starts a new round.</p></section>
+  </div>
+  <footer>Chaos Party prototype · Made for friends · Don't share personal information in your nickname.</footer>
+</main>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/*
+  SETUP: Replace the placeholder object below with your Firebase web app config.
+  Do not put private service-account keys here. A Firebase web config is designed
+  to be public; database rules are what control access.
+*/
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC_J8SzulizS2Heq-jwEFGJmB4Wi-Z2NB4",
+  authDomain: "xzh-party-game.firebaseapp.com",
+  databaseURL: "https://xzh-party-game-default-rtdb.asia-southeast1.firebasedatabase.app/",
+  projectId: "xzh-party-game",
+  appId: "1:715621662233:web:f33affb936150d5a817488"
+};
+const configured = !firebaseConfig.apiKey.startsWith("PASTE_") &&
+                   !firebaseConfig.projectId.startsWith("PASTE_") &&
+                   !firebaseConfig.databaseURL.startsWith("PASTE_");
+const $ = id => document.getElementById(id);
+const COLORS = ["#ff5ca8","#59e3e8","#ffd166","#6ef0a6","#b69cff","#ff9066","#8de0ff","#f3f66b","#f49aff","#c4f7d2"];
+let app, auth, db, uid=null, roomId=null, roomRef=null, isHost=false, myName="Player";
+let roomData={}, playerRef=null, playerListener=null, roomListener=null, gameLoop=null, lastSend=0;
+const keys = new Set();
+let pointerTarget=null;
+const canvas=$("game"), ctx=canvas.getContext("2d");
+const W=800,H=500;
+function setNotice(msg){$("setupNotice").textContent=msg}
+function show(id,on=true){$(id).classList.toggle("hidden",!on)}
+function randomCode(){return Math.random().toString(36).slice(2,8).toUpperCase().replace(/[IO01]/g,"X")}
+function escapeText(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function timeNow(){return Date.now()}
+function me(){return roomData.players && roomData.players[uid]}
+async function initFirebase(){
+ if(!configured) throw new Error("Firebase isn't configured yet. Open README.txt in the ZIP and follow the setup steps.");
+ if(!app){app=firebase.initializeApp(firebaseConfig);auth=firebase.auth();db=firebase.database()}
+ if(!auth.currentUser) await auth.signInAnonymously();
+ uid=auth.currentUser.uid;
+}
+async function createRoom(){
+ try{
+  await initFirebase(); myName=$("nickname").value.trim().slice(0,16)||"Player";
+  let code=randomCode(), ref=db.ref("rooms/"+code), tries=0;
+  while((await ref.get()).exists() && tries++<5){code=randomCode();ref=db.ref("rooms/"+code)}
+  roomId=code;roomRef=ref;isHost=true;
+  const player={name:myName,color:COLORS[Math.floor(Math.random()*COLORS.length)],x:W/2,y:H/2,alive:true,joinedAt:timeNow()};
+  await ref.set({host:uid,phase:"lobby",createdAt:timeNow(),roundStart:0,players:{[uid]:player},hazards:{seed:Math.floor(Math.random()*1e9)}});
+  enterRoom();
+ }catch(e){setNotice("Couldn't create room: "+e.message)}
+}
+async function joinRoom(){
+ try{
+  await initFirebase();myName=$("nickname").value.trim().slice(0,16)||"Player";
+  const code=$("roomInput").value.trim().toUpperCase();
+  if(!/^[A-Z0-9]{6}$/.test(code)) throw new Error("Enter the 6-character room code.");
+  const ref=db.ref("rooms/"+code), snap=await ref.get();
+  if(!snap.exists()) throw new Error("Room not found. Check the code.");
+  const data=snap.val();
+  if(data.phase==="playing") throw new Error("That round is already in progress. Join after it ends.");
+  if(Object.keys(data.players||{}).length>=10) throw new Error("This room is full (10 players max).");
+  roomId=code;roomRef=ref;isHost=false;
+  await ref.child("players/"+uid).set({name:myName,color:COLORS[Math.floor(Math.random()*COLORS.length)],x:W/2,y:H/2,alive:true,joinedAt:timeNow()});
+  enterRoom();
+ }catch(e){setNotice("Couldn't join room: "+e.message)}
+}
+function enterRoom(){
+ show("setup",false);show("lobby",true);show("playArea",true);
+ $("roomCode").textContent=roomId;$("start").classList.toggle("hidden",!isHost);
+ playerRef=roomRef.child("players/"+uid);
+ playerListener=snap=>{if(!snap.exists()){leaveRoom(false);return}};
+ playerRef.on("value",playerListener);
+ roomListener=snap=>{
+  roomData=snap.val()||{};
+  if(!roomData.players)roomData.players={};
+  renderLobby();renderPlayers();
+  if(roomData.phase==="playing"){ $("roundState").textContent="Playing"; startLoop() }
+  else if(roomData.phase==="finished"){ $("roundState").textContent="Finished"; stopLoop(); drawGame(); $("status").textContent=roomData.winnerName?roomData.winnerName+" wins!":"Round finished"; }
+  else { $("roundState").textContent="Lobby";stopLoop();drawGame() }
+ };
+ roomRef.on("value",roomListener);
+ setNotice("");
+}
+function renderLobby(){
+ const players=Object.values(roomData.players||{});
+ $("playerCount").textContent=players.length+"/10";
+ $("status").textContent=roomData.phase==="playing"?"Round in progress":roomData.phase==="finished"?"Round over":(players.length<2?"Waiting for friends…":"Ready to start!");
+ $("start").disabled=players.length<2||!isHost;
+}
+function renderPlayers(){
+ const players=Object.entries(roomData.players||{});
+ $("players").innerHTML=players.map(([id,p])=>`<div class="player"><span class="dot" style="background:${p.color||"#fff"}"></span><b>${escapeText(p.name||"Player")}${id===uid?" (you)":""}</b><small>${p.alive===false?"OUT":roomData.phase==="lobby"?"READY":"IN"}</small></div>`).join("");
+ $("aliveCount").textContent=players.filter(([,p])=>p.alive!==false).length;
+}
+async function startRound(){
+ if(!isHost||!roomRef)return;
+ const players=roomData.players||{};
+ if(Object.keys(players).length<2)return;
+ const reset={}; for(const [id,p] of Object.entries(players)){reset[id]={...p,x:80+Math.random()*640,y:80+Math.random()*340,alive:true}}
+ await roomRef.update({phase:"playing",roundStart:timeNow(),winnerName:"",players:reset,hazards:{seed:Math.floor(Math.random()*1e9)}});
+}
+function stopLoop(){if(gameLoop){cancelAnimationFrame(gameLoop);gameLoop=null}}
+function startLoop(){if(gameLoop)return;const tick=()=>{gameLoop=requestAnimationFrame(tick);updateGame();drawGame()};gameLoop=requestAnimationFrame(tick)}
+function hazardsAt(t){
+ const seed=(roomData.hazards&&roomData.hazards.seed)||123;
+ const n=4;
+ return Array.from({length:n},(_,i)=>({x:80+((seed%997+i*181+t*(75+i*13))%640),y:60+((seed%503+i*113+t*(48+i*17))%380),r:20+(i%2)*5}));
+}
+function updateGame(){
+ if(!roomData.players||!roomData.players[uid]||roomData.phase!=="playing")return;
+ const p=roomData.players[uid];if(p.alive===false)return;
+ let dx=0,dy=0;if(keys.has("ArrowLeft")||keys.has("a"))dx--;if(keys.has("ArrowRight")||keys.has("d"))dx++;if(keys.has("ArrowUp")||keys.has("w"))dy--;if(keys.has("ArrowDown")||keys.has("s"))dy++;
+ if(pointerTarget){dx=pointerTarget.x-p.x;dy=pointerTarget.y-p.y;const m=Math.hypot(dx,dy);if(m<8){dx=0;dy=0}else{dx/=m;dy/=m}}
+ const mag=Math.hypot(dx,dy)||1;const speed=3.3;
+ let x=Math.max(22,Math.min(W-22,p.x+dx/mag*speed)),y=Math.max(22,Math.min(H-22,p.y+dy/mag*speed));
+ if(timeNow()-lastSend>70){lastSend=timeNow();roomRef.child("players/"+uid).update({x,y}).catch(()=>{})}
+ const elapsed=(timeNow()-(roomData.roundStart||timeNow()))/1000;
+ if(isHost){
+  const hs=hazardsAt(elapsed);let updated=false;const players={...roomData.players};let alive=[];
+  for(const [id,pl] of Object.entries(players)){
+   if(pl.alive!==false){
+    const hit=hs.some(h=>Math.hypot((pl.x||0)-h.x,(pl.y||0)-h.y)<h.r+14);
+    if(hit){players[id]={...pl,alive:false};updated=true}else alive.push([id,pl]);
+   }
+  }
+  if(updated)roomRef.child("players").set(players).catch(()=>{});
+  if(alive.length<=1 && Object.keys(players).length>=2){
+   const winner=alive[0]?alive[0][1].name:"Nobody";
+   roomRef.update({phase:"finished",winnerName:winner}).catch(()=>{});
+  }
+  if(elapsed>60)roomRef.update({phase:"finished",winnerName:"Time's up"}).catch(()=>{});
+ }
+ $("timer").textContent=Math.max(0,elapsed).toFixed(1)+"s";
+}
+function drawGame(){
+ ctx.clearRect(0,0,W,H);
+ ctx.fillStyle="#10162d";ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle="#202b4b";ctx.lineWidth=1;
+ for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+ for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+ if(roomData.phase==="playing"){
+  const elapsed=(timeNow()-(roomData.roundStart||timeNow()))/1000;
+  for(const h of hazardsAt(elapsed)){ctx.beginPath();ctx.arc(h.x,h.y,h.r,0,Math.PI*2);ctx.fillStyle="#ff5ca8";ctx.fill();ctx.strokeStyle="#ffd5e7";ctx.lineWidth=3;ctx.stroke();ctx.fillStyle="#31132a";ctx.beginPath();ctx.arc(h.x-5,h.y-3,3,0,7);ctx.arc(h.x+6,h.y-3,3,0,7);ctx.fill()}
+ }
+ for(const [id,p] of Object.entries(roomData.players||{})){
+  const x=p.x||W/2,y=p.y||H/2;ctx.globalAlpha=p.alive===false?.28:1;
+  ctx.beginPath();ctx.arc(x,y,16,0,Math.PI*2);ctx.fillStyle=p.color||"#fff";ctx.fill();ctx.lineWidth=id===uid?4:2;ctx.strokeStyle=id===uid?"#fff":"#11152a";ctx.stroke();
+  ctx.fillStyle="#11152a";ctx.font="bold 11px system-ui";ctx.textAlign="center";ctx.fillText((p.name||"Player").slice(0,10),x,y+30);
+  if(p.alive===false){ctx.fillStyle="#fff";ctx.font="bold 22px system-ui";ctx.fillText("×",x,y+7)}
+  ctx.globalAlpha=1;
+ }
+ if(!roomData.phase||roomData.phase==="lobby"){ctx.fillStyle="#f7f8ff";ctx.textAlign="center";ctx.font="bold 25px system-ui";ctx.fillText("WAITING FOR THE PARTY",W/2,H/2-10);ctx.font="16px system-ui";ctx.fillStyle="#aeb8dc";ctx.fillText("Create a room and invite your friends",W/2,H/2+22)}
+ if(roomData.phase==="finished"){ctx.fillStyle="#ffd166";ctx.textAlign="center";ctx.font="bold 34px system-ui";ctx.fillText((roomData.winnerName||"Round finished")+"!",W/2,H/2);ctx.fillStyle="#f7f8ff";ctx.font="17px system-ui";ctx.fillText("Host can start another round from the lobby",W/2,H/2+34)}
+}
+async function leaveRoom(remove=true){
+ stopLoop();
+ if(roomRef&&uid&&remove){try{await roomRef.child("players/"+uid).remove()}catch(e){}}
+ if(roomRef){if(roomListener)roomRef.off("value",roomListener);if(playerRef&&playerListener)playerRef.off("value",playerListener)}
+ roomId=null;roomRef=null;roomData={};playerRef=null;playerListener=null;roomListener=null;isHost=false;
+ show("setup",true);show("lobby",false);show("playArea",false);setNotice("You're back at the lobby. Create a room or enter a room code.");
+}
+$("create").onclick=createRoom;$("join").onclick=joinRoom;$("start").onclick=startRound;$("leave").onclick=()=>leaveRoom(true);
+window.addEventListener("keydown",e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key))e.preventDefault();keys.add(k)});
+window.addEventListener("keyup",e=>keys.delete(e.key));
+canvas.addEventListener("pointerdown",e=>{canvas.setPointerCapture(e.pointerId);const r=canvas.getBoundingClientRect();pointerTarget={x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}});
+canvas.addEventListener("pointermove",e=>{if(e.buttons){const r=canvas.getBoundingClientRect();pointerTarget={x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}}});
+canvas.addEventListener("pointerup",()=>pointerTarget=null);canvas.addEventListener("pointercancel",()=>pointerTarget=null);
+if(!configured)setNotice("Setup needed: open README.txt in the ZIP. After Firebase setup, replace the firebaseConfig placeholders in index.html. No coding knowledge needed—just copy and paste the config.");
+drawGame();
+</script>
+</body>
+</html>
